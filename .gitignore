@@ -18,3 +18,8 @@ coverage/
 *.swo
 *.swn
 *.claude
+README2.md
+venv/
+.venv/
+env/
+ENV/
