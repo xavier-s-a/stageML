@@ -4,3 +4,5 @@ torchvision>=0.16.0
 torch-mlir
 pytest>=7.0
 numpy>=1.24
+scipy>=1.10
+pytest-cov>=3.0
