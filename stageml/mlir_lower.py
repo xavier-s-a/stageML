@@ -1,21 +1,105 @@
 """
 stageml/mlir_lower.py
-Phase 3 — MLIR Lowering
+Phase 3 — MLIR Lowering (improved text sketch)
 
 Takes the stage-annotated torch.fx graph from Phase 2.
-Emits MLIR (Linalg/Arith dialects) with a stage attribute
-on every SSA value.
+Emits a human-readable MLIR sketch with:
+  - Realistic op names (linalg.matmul, arith.maximumf, etc.)
+  - Ranked tensor types when shape metadata is available
+  - stageml.stage attributes on every SSA value
 
-Week 3 goal: emit valid MLIR with stageml.stage = 0 or 1
-on every value, for TinyMLP.
-
-Dependencies:
-    pip install mlir-python-bindings torch-mlir
+Dependencies for real bindings (not yet available on Python 3.12 / macOS):
+    pip install torch-mlir mlir-python-bindings
 """
 
 from __future__ import annotations
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torch.fx as fx
 from stageml.annotations import BindingTime, stage0, stage1
+
+
+# ── Op-name mapping from torch to MLIR dialect ops ───────────────────────────
+
+_CALL_FN_MLIR: dict = {
+    F.linear:           "linalg.matmul_plus_bias",
+    F.relu:             "arith.maximumf",          # max(x, 0)
+    F.softmax:          "stageml.softmax",         # no direct linalg equivalent
+    F.dropout:          "stageml.dropout",
+    torch.relu:         "arith.maximumf",
+    torch.matmul:       "linalg.matmul",
+    torch.mm:           "linalg.matmul",
+    torch.bmm:          "linalg.batch_matmul",
+    torch.add:          "arith.addf",
+    torch.mul:          "arith.mulf",
+    torch.transpose:    "linalg.transpose",
+    torch.sigmoid:      "stageml.sigmoid",
+    torch.tanh:         "math.tanh",
+}
+
+_MODULE_MLIR: dict = {
+    nn.Linear:          "linalg.matmul_plus_bias",
+    nn.ReLU:            "arith.maximumf",
+    nn.Softmax:         "stageml.softmax",
+    nn.LayerNorm:       "stageml.layer_norm",
+    nn.MultiheadAttention: "stageml.multi_head_attention",
+}
+
+_METHOD_MLIR: dict = {
+    "transpose":        "linalg.transpose",
+    "reshape":          "memref.reshape",
+    "view":             "memref.reshape",
+    "contiguous":       "stageml.contiguous",
+}
+
+
+def _mlir_op_name(node: fx.Node, gm: fx.GraphModule) -> str:
+    """Map an FX node to a descriptive MLIR op name."""
+    if node.op == "get_attr":
+        return "arith.constant"
+    if node.op == "call_function":
+        return _CALL_FN_MLIR.get(
+            node.target,
+            f"stageml.{getattr(node.target, '__name__', 'op')}",
+        )
+    if node.op == "call_method":
+        return _METHOD_MLIR.get(node.target, f"stageml.{node.target}")
+    if node.op == "call_module":
+        try:
+            submod = gm.get_submodule(node.target)
+            for mod_cls, mlir_name in _MODULE_MLIR.items():
+                if isinstance(submod, mod_cls):
+                    return mlir_name
+            return f"stageml.{type(submod).__name__.lower()}"
+        except Exception:
+            return f"stageml.{node.target}"
+    return "stageml.op"
+
+
+def _mlir_type(node: fx.Node) -> str:
+    """
+    Return the MLIR tensor type for a node.
+    Uses shape metadata from ShapeProp if available; otherwise falls back to *.
+    """
+    meta = node.meta
+
+    # ShapeProp stores shape in 'tensor_meta'
+    if "tensor_meta" in meta:
+        tm = meta["tensor_meta"]
+        shape = tm.shape if hasattr(tm, "shape") else None
+        if shape is not None and len(shape) > 0:
+            shape_str = "x".join(str(d) for d in shape)
+            return f"tensor<{shape_str}xf32>"
+
+    # torch.compile / dynamo stores in 'example_value'
+    if "example_value" in meta:
+        ev = meta["example_value"]
+        if hasattr(ev, "shape") and ev.shape:
+            shape_str = "x".join(str(d) for d in ev.shape)
+            return f"tensor<{shape_str}xf32>"
+
+    return "tensor<*xf32>"
 
 
 def lower_to_mlir(
@@ -23,58 +107,77 @@ def lower_to_mlir(
     annotations: dict[fx.Node, BindingTime],
 ) -> str:
     """
-    Lower a stage-annotated FX graph to MLIR text.
-    Each SSA value gets a {stageml.stage = N} attribute.
+    Lower a stage-annotated FX graph to an MLIR text sketch.
 
-    Currently emits a human-readable sketch.
-    Week 3: replace with real mlir.ir.Module construction
-    using MLIR Python bindings.
+    Each SSA value gets a {stageml.stage = N} attribute.
+    Op names match the Linalg/Arith/Math dialect where possible.
+    Tensor types are ranked when shape metadata is available.
 
     Returns:
-        mlir_text : string containing the MLIR module
+        mlir_text : string containing the MLIR module sketch
     """
-    lines = []
-    lines.append("// StageML generated MLIR")
-    lines.append("// Stage-0 values = compile-time static (will be folded)")
-    lines.append("// Stage-1 values = runtime dynamic (kept in residual)")
+    lines: list[str] = []
+    lines.append("// StageML generated MLIR (improved sketch)")
+    lines.append("// Stage-0 = compile-time static  |  Stage-1 = runtime dynamic")
     lines.append("")
     lines.append("module {")
     lines.append("  func.func @staged_fn(")
 
-    # Emit function signature
+    # Function signature: one argument per placeholder
     placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
     for i, node in enumerate(placeholders):
-        stage = annotations.get(node, stage1)
-        comma = "," if i < len(placeholders) - 1 else ""
+        stage  = annotations.get(node, stage1)
+        comma  = "," if i < len(placeholders) - 1 else ""
+        tensor = _mlir_type(node)
         lines.append(
-            f"    %{node.name}: tensor<*xf32> {{stageml.stage = {stage.level}}}{comma}"
+            f"    %{node.name}: {tensor} {{stageml.stage = {stage.level}}}{comma}"
         )
-    lines.append("  ) -> tensor<*xf32> {")
+
+    # Infer return type from output node
+    output_nodes = [n for n in gm.graph.nodes if n.op == "output"]
+    ret_type = "tensor<*xf32>"
+    if output_nodes:
+        out_args = output_nodes[0].args[0]
+        if isinstance(out_args, fx.Node):
+            ret_type = _mlir_type(out_args)
+        elif isinstance(out_args, (list, tuple)) and out_args:
+            ret_type = _mlir_type(out_args[0]) if isinstance(out_args[0], fx.Node) else "tensor<*xf32>"
+
+    lines.append(f"  ) -> {ret_type} {{")
     lines.append("")
 
-    # Emit body ops
+    # Function body
     for node in gm.graph.nodes:
         if node.op in ("placeholder", "output"):
             continue
-        stage = annotations.get(node, stage1)
-        operands = ", ".join(
-            f"%{a.name}" for a in node.args if isinstance(a, fx.Node)
-        )
+
+        stage    = annotations.get(node, stage1)
+        op_name  = _mlir_op_name(node, gm)
+        out_type = _mlir_type(node)
+        operands = ", ".join(f"%{a.name}" for a in node.args if isinstance(a, fx.Node))
+        stage_comment = "STATIC — folded" if stage == stage0 else "dynamic — kept"
+
         lines.append(
-            f"    %{node.name} = stageml.op {operands}"
-            f"  // {{stageml.stage = {stage.level}}}"
-            f"  // {'STATIC — will be folded' if stage == stage0 else 'dynamic — kept'}"
+            f"    %{node.name} : {out_type} = {op_name}({operands})"
+            f"  // {{stageml.stage = {stage.level}}}  // {stage_comment}"
         )
 
-    lines.append("")
+    # Return statement
+    if output_nodes:
+        out_args = output_nodes[0].args[0]
+        ret_val = f"%{out_args.name}" if isinstance(out_args, fx.Node) else "%result"
+    else:
+        ret_val = "%result"
+
+    lines.append(f"    return {ret_val} : {ret_type}")
     lines.append("  }")
     lines.append("}")
     return "\n".join(lines)
 
 
 def print_mlir(mlir_text: str) -> None:
-    print("\n" + "─"*60)
+    print("\n" + "─" * 60)
     print("Generated MLIR:")
-    print("─"*60)
+    print("─" * 60)
     print(mlir_text)
-    print("─"*60 + "\n")
+    print("─" * 60 + "\n")

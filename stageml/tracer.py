@@ -113,22 +113,42 @@ def print_annotated_graph(
 
 def trace_and_annotate(
     fn: Callable,
-    example_inputs: tuple,
+    stage_env_or_inputs=None,
 ) -> tuple[fx.GraphModule, dict[fx.Node, BindingTime]]:
     """
-    Trace the function with torch.fx and annotate every node with its stage.
-    
-    Args:
-        fn             : a @compile_staged decorated function
-        example_inputs : tuple of example tensors (for tracing shapes)
-    
+    Trace the function/module with torch.fx and annotate every node with its stage.
+
+    Two calling conventions:
+      1. New API — nn.Module or any callable + stage_env dict:
+            trace_and_annotate(model, {'x': 'stage1'})
+         String values 'stage0'/'stage1' are converted to BindingTime objects.
+         BindingTime values are passed through unchanged.
+
+      2. Legacy API — @compile_staged decorated function (stage_env_or_inputs
+         is a tuple or None; the function's _gamma attribute is used):
+            trace_and_annotate(fn, (example_input,))
+
     Returns:
         gm          : the traced GraphModule
         annotations : node → BindingTime mapping
     """
+    if isinstance(stage_env_or_inputs, dict):
+        # New API: build gamma from the dict
+        gamma: dict[str, BindingTime] = {}
+        for k, v in stage_env_or_inputs.items():
+            if isinstance(v, BindingTime):
+                gamma[k] = v
+            elif isinstance(v, str):
+                gamma[k] = stage1 if v.lower() == "stage1" else stage0
+            else:
+                gamma[k] = stage1
+        gm = fx.symbolic_trace(fn)
+        annotations = propagate_stages(gm.graph, gamma)
+        return gm, annotations
+
+    # Legacy API: require @compile_staged
     assert hasattr(fn, "_gamma"), \
         f"{fn.__name__} must be decorated with @compile_staged"
-
     gm = fx.symbolic_trace(fn)
     annotations = propagate_stages(gm.graph, fn._gamma)
     return gm, annotations
