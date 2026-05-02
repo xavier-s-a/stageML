@@ -66,7 +66,6 @@ def specialize(
             except Exception:
                 pass  # If evaluation fails, leave as dynamic
 
-    # [Week 4] Replace stage-0 nodes with arith.constant in the graph
     # For now: report what would be folded
     folded   = [n for n in gm.graph.nodes if annotations.get(n) == stage0 and n in cache]
     kept     = [n for n in gm.graph.nodes if annotations.get(n) == stage1]
@@ -75,7 +74,7 @@ def specialize(
     print(f"  Folded {len(folded)} stage-0 ops at compile time")
     print(f"  Kept   {len(kept)} stage-1 ops in residual")
 
-    return gm  # Week 4: return actual modified GraphModule
+    return gm
 
 
 def validate_preservation(

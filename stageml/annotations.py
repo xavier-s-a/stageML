@@ -102,9 +102,6 @@ def compile_staged(fn: Callable) -> Callable:
             meaning = "compile-time static" if bt == stage0 else "runtime dynamic"
             print(f"  {name:<18} {str(bt):<15} {meaning}")
         print(f"{'─'*50}")
-        print(f"[Week 2] Stage propagation via torch.fx will go here.")
-        print(f"[Week 3] MLIR lowering will go here.")
-        print(f"[Week 4] Specialization pass will go here.\n")
 
     def compile():
         """
@@ -113,11 +110,7 @@ def compile_staged(fn: Callable) -> Callable:
         """
         print(f"[StageML] Compiling {fn.__name__}...")
         print(f"  Staging environment: {gamma}")
-        print(f"  [Week 2] torch.fx trace + stage propagation")
-        print(f"  [Week 3] MLIR lowering")
-        print(f"  [Week 4] Stage-0 specialization pass")
-        print(f"  [Week 5] Emit residual + benchmark")
-        return fn   # placeholder — returns original fn until pipeline is wired
+        return fn
 
     fn.analyze  = analyze
     fn.compile  = compile

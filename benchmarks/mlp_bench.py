@@ -80,7 +80,6 @@ def run_benchmark():
 
     print(f"\n  PyTorch eager   : {t_original:.4f} ms/call")
     print(f"  torch.compile   : {t_compiled:.4f} ms/call")
-    print(f"  [Week 5] StageML residual will be measured here")
     print(f"\n  Op count reduction: {report.static_pct:.1f}% of ops eliminated")
     print("="*60 + "\n")
 
