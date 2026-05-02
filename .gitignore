@@ -23,3 +23,5 @@ venv/
 .venv/
 env/
 ENV/
+benchmarks/__pycache__/
+stageml/__pycache__/
