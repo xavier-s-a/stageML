@@ -67,7 +67,6 @@ def lower_to_mlir(
         )
 
     lines.append("")
-    lines.append("    // [Week 3] Replace with real linalg/arith ops via torch-mlir")
     lines.append("  }")
     lines.append("}")
     return "\n".join(lines)
