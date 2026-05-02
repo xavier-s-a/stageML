@@ -10,18 +10,50 @@ The propagation rule (the whole analysis in one line):
     stage(node) = D   if ANY operand of node is D
 
 This is a forward dataflow analysis over the two-point lattice {S ⊑ D}.
-
-Week 2 goal: get this running on TinyMLP and print the annotated graph.
 """
 
 from __future__ import annotations
-from typing import Callable, Any
+from typing import Callable
 import torch
+import torch.nn as nn
 import torch.fx as fx
 from stageml.annotations import BindingTime, stage0, stage1
 
 
-# ── Stage-annotated FX node ───────────────────────────────────────────────────
+# ── Custom FX tracer ─────────────────────────────────────────────────────────
+
+class StageMLTracer(fx.Tracer):
+    """
+    FX tracer that traces *into* primitive modules (nn.Linear, nn.LayerNorm,
+    etc.) so their parameters appear as get_attr nodes in the graph.
+
+    get_attr nodes are classified as stage-0 by propagate_stages, because
+    trained weights and buffers are always static at deployment time.
+
+    Modules in _LEAF_MODULES are NOT traced into (they are too complex or
+    have non-traceable control flow).
+    """
+
+    _LEAF_MODULES = (
+        nn.MultiheadAttention,
+        nn.Transformer,
+        nn.TransformerEncoder,
+        nn.TransformerDecoder,
+        nn.TransformerEncoderLayer,
+        nn.TransformerDecoderLayer,
+        nn.LSTM,
+        nn.GRU,
+        nn.LSTMCell,
+        nn.GRUCell,
+        nn.Embedding,
+        nn.EmbeddingBag,
+    )
+
+    def is_leaf_module(self, m: nn.Module, module_qualified_name: str) -> bool:
+        return isinstance(m, self._LEAF_MODULES)
+
+
+# ── Stage propagation ─────────────────────────────────────────────────────────
 
 def propagate_stages(
     graph: fx.Graph,
@@ -29,11 +61,11 @@ def propagate_stages(
 ) -> dict[fx.Node, BindingTime]:
     """
     Forward dataflow analysis.
-    
+
     Given:
       graph : the torch.fx computation graph of the function
       gamma : staging environment Γ (parameter name → binding time)
-    
+
     Returns:
       annotations : dict mapping every fx.Node → BindingTime
 
@@ -52,7 +84,7 @@ def propagate_stages(
             annotations[node] = bt
 
         elif node.op == "get_attr":
-            # Model weights / buffers — treat as stage0 (static after training)
+            # Model weights / buffers — always stage-0 (static after training)
             annotations[node] = stage0
 
         elif node.op in ("call_function", "call_method", "call_module"):
@@ -67,15 +99,13 @@ def propagate_stages(
                 # No operands → conservative: stage0
                 annotations[node] = stage0
             else:
-                # Fold join over all operand stages
                 result = operand_stages[0]
                 for s in operand_stages[1:]:
                     result = result.join(s)
                 annotations[node] = result
 
         elif node.op == "output":
-            # Output node — stage is the join of all return values
-            # args[0] may be a tuple of nodes or a single node
+            # Output stage is the join of all returned values
             def flatten_args(args):
                 for a in args:
                     if isinstance(a, fx.Node):
@@ -119,21 +149,22 @@ def trace_and_annotate(
     Trace the function/module with torch.fx and annotate every node with its stage.
 
     Two calling conventions:
-      1. New API — nn.Module or any callable + stage_env dict:
-            trace_and_annotate(model, {'x': 'stage1'})
-         String values 'stage0'/'stage1' are converted to BindingTime objects.
-         BindingTime values are passed through unchanged.
 
-      2. Legacy API — @compile_staged decorated function (stage_env_or_inputs
-         is a tuple or None; the function's _gamma attribute is used):
-            trace_and_annotate(fn, (example_input,))
+      New API — nn.Module + stage_env dict:
+          trace_and_annotate(model, {'x': 'stage1'})
+        Uses StageMLTracer, which traces into nn.Linear, nn.LayerNorm, etc.
+        so that weight/bias parameters appear as get_attr nodes (stage-0).
+
+      Legacy API — @compile_staged decorated function:
+          trace_and_annotate(fn, (example_input,))
+        Uses standard fx.symbolic_trace via fn._gamma.
 
     Returns:
         gm          : the traced GraphModule
         annotations : node → BindingTime mapping
     """
     if isinstance(stage_env_or_inputs, dict):
-        # New API: build gamma from the dict
+        # Build gamma from the dict (strings or BindingTime values)
         gamma: dict[str, BindingTime] = {}
         for k, v in stage_env_or_inputs.items():
             if isinstance(v, BindingTime):
@@ -142,11 +173,19 @@ def trace_and_annotate(
                 gamma[k] = stage1 if v.lower() == "stage1" else stage0
             else:
                 gamma[k] = stage1
-        gm = fx.symbolic_trace(fn)
+
+        if isinstance(fn, nn.Module):
+            # Use StageMLTracer so that module parameters appear as get_attr nodes
+            tracer = StageMLTracer()
+            graph  = tracer.trace(fn)
+            gm     = fx.GraphModule(fn, graph)
+        else:
+            # Plain function with a manually-built gamma dict
+            gm = fx.symbolic_trace(fn)
         annotations = propagate_stages(gm.graph, gamma)
         return gm, annotations
 
-    # Legacy API: require @compile_staged
+    # Legacy API: @compile_staged functions
     assert hasattr(fn, "_gamma"), \
         f"{fn.__name__} must be decorated with @compile_staged"
     gm = fx.symbolic_trace(fn)
