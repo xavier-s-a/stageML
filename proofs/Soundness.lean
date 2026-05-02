@@ -12,27 +12,25 @@
 --   2. lake build
 --   3. lean proofs/Soundness.lean
 
--- ── The two-point binding-time lattice ──────────────────────────────────────
+
 
 inductive BindingTime : Type
   | S : BindingTime   -- static  (stage0, compile-time)
   | D : BindingTime   -- dynamic (stage1, runtime)
   deriving DecidableEq, Repr
 
--- Lattice order: S ⊑ D
+
 def BindingTime.le : BindingTime → BindingTime → Prop
   | .S, _  => True
   | .D, .D => True
   | .D, .S => False
 
--- Lattice join: S ⊔ S = S, S ⊔ D = D, D ⊔ D = D
 def BindingTime.join : BindingTime → BindingTime → BindingTime
   | .S, .S => .S
   | .S, .D => .D
   | .D, .S => .D
   | .D, .D => .D
 
--- ── Lemmas about the lattice ─────────────────────────────────────────────────
 
 theorem join_comm (a b : BindingTime) :
     BindingTime.join a b = BindingTime.join b a := by
@@ -57,7 +55,6 @@ theorem join_S_iff (a b : BindingTime) :
     BindingTime.join a b = .S ↔ a = .S ∧ b = .S := by
   cases a <;> cases b <;> simp [BindingTime.join]
 
--- ── The stage propagation function ───────────────────────────────────────────
 
 -- A simplified node representation for the proof.
 -- In the real compiler, nodes are fx.Nodes with arbitrary operand lists.
