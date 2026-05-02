@@ -1,12 +1,4 @@
-"""
-stageml/runtime.py
-Phase 5 — Runtime Entry Point + Analysis Report
 
-This is the user-facing compile() entry point.
-Glues Phases 1-4 together and produces:
-  (a) a callable residual function
-  (b) a StagingReport with quantified analysis
-"""
 
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -22,11 +14,7 @@ from stageml.evaluator    import specialize
 
 @dataclass
 class StagingReport:
-    """
-    The staging analysis report — the key practitioner-facing output.
-    Tells an ML engineer exactly how much of their model is
-    statically eliminable before the first inference call.
-    """
+   
     fn_name:      str
     total_ops:    int
     static_ops:   int
@@ -68,31 +56,9 @@ def compile_model(
     verbose:       bool = True,
     stage_env:     Optional[dict[str, str]] = None,
 ) -> tuple[Callable, StagingReport]:
-    """
-    Full StageML compilation pipeline.
-
-    Two calling conventions:
-
-      New API (nn.Module):
-        compile_model(model, stage_env={'x': 'stage1'}, example_input=x)
-
-      Legacy API (@compile_staged function):
-        compile_model(fn, example_input=x, static_vals={'W1': w1, ...})
-
-    Args:
-        fn            : nn.Module or @compile_staged decorated function
-        example_input : optional stage-1 input tensor (enables shape propagation)
-        static_vals   : dict of stage-0 parameter name → tensor (legacy API)
-        verbose       : print annotated graph and MLIR
-        stage_env     : dict mapping input names to 'stage0'/'stage1' (new API)
-
-    Returns:
-        residual_gm : GraphModule with stage-0 ops folded
-        report      : StagingReport with full analysis
-    """
+   
     static_vals = static_vals or {}
 
-    # Resolve the effective stage env and function name
     if stage_env is not None:
         effective_env = stage_env
         fn_name = type(fn).__name__ if not hasattr(fn, "__name__") else fn.__name__
@@ -104,10 +70,8 @@ def compile_model(
             "Must provide stage_env=... or decorate the function with @compile_staged"
         )
 
-    # Phase 2: trace + propagate stages
     gm, annotations = trace_and_annotate(fn, effective_env)
 
-    # Shape propagation: only safe for nn.Module (single-input) path
     if example_input is not None and stage_env is not None:
         try:
             from torch.fx.passes.shape_prop import ShapeProp

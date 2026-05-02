@@ -1,16 +1,4 @@
-"""
-benchmarks/attention_bench.py
-Benchmark 2 — Single-Head Attention with fixed weights.
 
-Measures:
-  - Staging analysis (op counts, static vs dynamic)
-  - Inference latency: original vs torch.compile
-  - Numerical correctness of the specialized residual
-
-Run with:
-    cd stageml
-    python benchmarks/attention_bench.py
-"""
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -26,7 +14,6 @@ from stageml.evaluator  import specialize
 
 
 class SingleHeadAttention(nn.Module):
-    """Single-head attention with fixed sequence length and embed dim."""
 
     def __init__(self, embed_dim: int = 64, seq_len: int = 32):
         super().__init__()

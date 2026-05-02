@@ -64,7 +64,6 @@ def test_residual_matches_multiple_inputs():
 
 
 def test_residual_has_fewer_nodes():
-    """The residual graph should have no more nodes than the original."""
     model = TinyMLP()
     gm, gamma = trace_and_annotate(model, {"x": "stage1"})
     original_count = len(list(gm.graph.nodes))

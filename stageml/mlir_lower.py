@@ -1,16 +1,3 @@
-"""
-stageml/mlir_lower.py
-Phase 3 — MLIR Lowering (improved text sketch)
-
-Takes the stage-annotated torch.fx graph from Phase 2.
-Emits a human-readable MLIR sketch with:
-  - Realistic op names (linalg.matmul, arith.maximumf, etc.)
-  - Ranked tensor types when shape metadata is available
-  - stageml.stage attributes on every SSA value
-
-Dependencies for real bindings (not yet available on Python 3.12 / macOS):
-    pip install torch-mlir mlir-python-bindings
-"""
 
 from __future__ import annotations
 import torch
@@ -20,7 +7,6 @@ import torch.fx as fx
 from stageml.annotations import BindingTime, stage0, stage1
 
 
-# ── Op-name mapping from torch to MLIR dialect ops ───────────────────────────
 
 _CALL_FN_MLIR: dict = {
     F.linear:           "linalg.matmul_plus_bias",
@@ -106,16 +92,7 @@ def lower_to_mlir(
     gm: fx.GraphModule,
     annotations: dict[fx.Node, BindingTime],
 ) -> str:
-    """
-    Lower a stage-annotated FX graph to an MLIR text sketch.
-
-    Each SSA value gets a {stageml.stage = N} attribute.
-    Op names match the Linalg/Arith/Math dialect where possible.
-    Tensor types are ranked when shape metadata is available.
-
-    Returns:
-        mlir_text : string containing the MLIR module sketch
-    """
+    
     lines: list[str] = []
     lines.append("// StageML generated MLIR (improved sketch)")
     lines.append("// Stage-0 = compile-time static  |  Stage-1 = runtime dynamic")

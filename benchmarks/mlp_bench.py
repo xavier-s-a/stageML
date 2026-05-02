@@ -1,15 +1,3 @@
-"""
-benchmarks/mlp_bench.py
-Benchmark 1 — TinyMLP with fixed weights.
-
-Measures:
-  - Op count before and after staging
-  - Inference latency: original vs residual vs torch.compile
-
-Run with:
-    cd stageml
-    python benchmarks/mlp_bench.py
-"""
 
 import torch
 import torch.nn.functional as F
@@ -20,7 +8,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from stageml import stage0, stage1, compile_staged, compile_model
 
 
-# ── Model definition ──────────────────────────────────────────────────────────
 
 @compile_staged
 def tiny_mlp(
@@ -39,19 +26,16 @@ def run_benchmark():
     print("StageML Benchmark 1: TinyMLP")
     print("="*60)
 
-    # Fixed weights (stage0) — simulates post-training deployment
     torch.manual_seed(42)
     W1 = torch.randn(128, 64)
     b1 = torch.randn(128)
     W2 = torch.randn(10, 128)
     b2 = torch.randn(10)
 
-    # Dynamic input (stage1)
     x  = torch.randn(1, 64)
 
     static_vals = {"W1": W1, "b1": b1, "W2": W2, "b2": b2}
 
-    # ── StageML compile ───────────────────────────────────────────────────────
     print("\n[1] Running StageML compiler pipeline...")
     residual_fn, report = compile_model(
         tiny_mlp,
@@ -60,7 +44,6 @@ def run_benchmark():
         verbose=True,
     )
 
-    # ── Latency baseline: original PyTorch ───────────────────────────────────
     N = 1000
     print(f"[2] Latency benchmark ({N} iterations)...")
 
