@@ -9,7 +9,9 @@ import torch.fx as fx
 from stageml.annotations import BindingTime, stage0, stage1
 from stageml.tracer       import trace_and_annotate, staging_summary, print_annotated_graph
 from stageml.mlir_lower   import lower_to_mlir, print_mlir
+from stageml.real_mlir_lower import lower_to_parseable_mlir, write_parseable_mlir
 from stageml.evaluator    import specialize
+from stageml.rewrite      import optimize_evaluation_order
 
 
 @dataclass
@@ -55,6 +57,9 @@ def compile_model(
     static_vals:   Optional[dict[str, torch.Tensor]] = None,
     verbose:       bool = True,
     stage_env:     Optional[dict[str, str]] = None,
+    enable_rewrite: bool = False,
+    mlir_backend:  str = "sketch",
+    mlir_output_path: Optional[str] = None,
 ) -> tuple[Callable, StagingReport]:
    
     static_vals = static_vals or {}
@@ -72,6 +77,11 @@ def compile_model(
 
     gm, annotations = trace_and_annotate(fn, effective_env)
 
+    if enable_rewrite:
+        gm, annotations, rewrite_stats = optimize_evaluation_order(gm, annotations)
+        if verbose and rewrite_stats.total_rewrites:
+            print(f"[StageML Rewrite] Applied {rewrite_stats.total_rewrites} evaluation-order rewrite(s)")
+
     if example_input is not None and stage_env is not None:
         try:
             from torch.fx.passes.shape_prop import ShapeProp
@@ -83,9 +93,18 @@ def compile_model(
         print_annotated_graph(gm.graph, annotations)
 
     # Phase 3: lower to MLIR
-    mlir_text = lower_to_mlir(gm, annotations)
-    if verbose:
-        print_mlir(mlir_text)
+    if mlir_backend == "parseable":
+        mlir_text = lower_to_parseable_mlir(gm, annotations, fn_name=fn_name)
+        if mlir_output_path is not None:
+            write_parseable_mlir(gm, annotations, mlir_output_path, fn_name=fn_name)
+        if verbose:
+            print_mlir(mlir_text)
+    elif mlir_backend == "sketch":
+        mlir_text = lower_to_mlir(gm, annotations)
+        if verbose:
+            print_mlir(mlir_text)
+    else:
+        raise ValueError("mlir_backend must be 'sketch' or 'parseable'")
 
     # Phase 4: specialize
     residual_gm = specialize(gm, annotations, static_vals)

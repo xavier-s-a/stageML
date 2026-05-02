@@ -3,6 +3,7 @@ import torch.nn as nn
 import time
 from stageml.tracer import trace_and_annotate
 from stageml.evaluator import specialize
+from stageml.annotations import stage0
  
  
 def benchmark_latency(fn, x, warmup=200, iterations=2000):
@@ -124,12 +125,11 @@ def run_benchmark(name, model, input_shape):
     static_names = []
     dynamic_names = []
     for n in gm.graph.nodes:
-        stage = gamma.get(n.name)
-        if stage is not None and str(stage) == 'static':
+        if gamma.get(n) == stage0:
             static_names.append(n.name)
         else:
             dynamic_names.append(n.name)
-    
+
     static_ops = len(static_names)
     print(f"\n  Total ops       : {total}")
     print(f"  Stage-0 (static): {static_ops} ({static_ops/total*100:.1f}%)")
@@ -147,9 +147,8 @@ def run_benchmark(name, model, input_shape):
             print(f"    * {n.name}: {n.target.__name__}")
     
     # Specialise
-    gm_residual = specialize(gm, gamma)
-    
     original_nodes = len(list(gm.graph.nodes))
+    gm_residual = specialize(gm, gamma)
     residual_nodes = len(list(gm_residual.graph.nodes))
     
     # Correctness
