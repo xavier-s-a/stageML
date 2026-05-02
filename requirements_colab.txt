@@ -1,0 +1,10 @@
+torch
+torchvision
+numpy
+pytest
+loralib
+transformers
+peft
+accelerate
+-f https://github.com/llvm/torch-mlir-release/releases/expanded_assets/dev-wheels
+torch-mlir

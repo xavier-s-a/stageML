@@ -37,7 +37,7 @@ class MoERouterOnly(nn.Module):
         return F.softmax(x @ w_norm.t() + self.router_bias, dim=-1)
 
 
-def run_one(name: str, model: nn.Module, x: torch.Tensor, warmup: int, iterations: int) -> dict:
+def run_one(name: str, model: nn.Module, x: torch.Tensor, warmup: int, iterations: int, include_torch_compile: bool) -> dict:
     model.eval()
     gm, annotations = trace_and_annotate(model, {"x": "stage1"})
     compute_before = count_compute_ops(gm)
@@ -53,15 +53,16 @@ def run_one(name: str, model: nn.Module, x: torch.Tensor, warmup: int, iteration
     eager_ms = benchmark_latency_ms(model, x, warmup=warmup, iterations=iterations)
     residual_ms = benchmark_latency_ms(residual, x, warmup=warmup, iterations=iterations)
 
-    compiled_ms = None
+    compiled_ms = float("nan")
     compile_ok = False
-    try:
-        compiled = torch.compile(model)
-        compiled(x)
-        compiled_ms = benchmark_latency_ms(compiled, x, warmup=warmup, iterations=iterations)
-        compile_ok = True
-    except Exception:
-        compiled_ms = float("nan")
+    if include_torch_compile:
+        try:
+            compiled = torch.compile(model)
+            compiled(x)
+            compiled_ms = benchmark_latency_ms(compiled, x, warmup=warmup, iterations=iterations)
+            compile_ok = True
+        except Exception:
+            compiled_ms = float("nan")
 
     return {
         "benchmark": name,
@@ -89,6 +90,7 @@ def main():
     parser.add_argument("--warmup", type=int, default=50)
     parser.add_argument("--iterations", type=int, default=200)
     parser.add_argument("--out", default="out/gpu_lora_moe_results.csv")
+    parser.add_argument("--include-torch-compile", action="store_true")
     args = parser.parse_args()
 
     device = get_device()
@@ -101,10 +103,10 @@ def main():
     rows = []
 
     lora_model = LoRALinear(args.dim, args.dim, args.rank).to(device=device, dtype=dtype)
-    rows.append(run_one("lora_merge", lora_model, x, args.warmup, args.iterations))
+    rows.append(run_one("lora_merge", lora_model, x, args.warmup, args.iterations, args.include_torch_compile))
 
     moe_model = MoERouterOnly(args.dim, num_experts=8).to(device=device, dtype=dtype)
-    rows.append(run_one("moe_router_norm", moe_model, x, args.warmup, args.iterations))
+    rows.append(run_one("moe_router_norm", moe_model, x, args.warmup, args.iterations, args.include_torch_compile))
 
     write_csv(args.out, rows)
     for row in rows:

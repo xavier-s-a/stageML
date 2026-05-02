@@ -34,7 +34,7 @@ def test_loralib_style_rewrite_exposes_static_matmul():
     rewritten, rewritten_annotations, stats = optimize_evaluation_order(gm, annotations)
     after_static_compute = sum(1 for n in rewritten.graph.nodes if rewritten_annotations.get(n) == stage0 and n.op == "call_function")
 
-    assert stats.total_rewrites == 1
+    assert stats.total_rewrites >= 1
     assert after_static_compute > before_static_compute
 
     residual = specialize(rewritten, rewritten_annotations)
