@@ -151,24 +151,7 @@ def trace_and_annotate(
     fn: Callable,
     stage_env_or_inputs=None,
 ) -> tuple[fx.GraphModule, dict[fx.Node, BindingTime]]:
-    """
-    Trace the function/module with torch.fx and annotate every node with its stage.
-
-    Two calling conventions:
-
-      New API — nn.Module + stage_env dict:
-          trace_and_annotate(model, {'x': 'stage1'})
-        Uses StageMLTracer, which traces into nn.Linear, nn.LayerNorm, etc.
-        so that weight/bias parameters appear as get_attr nodes (stage-0).
-
-      Legacy API — @compile_staged decorated function:
-          trace_and_annotate(fn, (example_input,))
-        Uses standard fx.symbolic_trace via fn._gamma.
-
-    Returns:
-        gm          : the traced GraphModule
-        annotations : node → BindingTime mapping
-    """
+  
     if isinstance(stage_env_or_inputs, dict):
         # Build gamma from the dict (strings or BindingTime values)
         gamma: dict[str, BindingTime] = {}
